@@ -1,0 +1,409 @@
+---
+title: "Final Project"
+author: "Matthias Ronnau and Willis Silliman"
+date: "May 15, 2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(readr)
+library(survey)
+library(VIM)
+```
+
+```{r, message=FALSE}
+# Read in the Data
+data <- read_tsv("09833-0001-Data.tsv")
+```
+
+# Data Cleaning
+
+```{r}
+# Creating the New Data Frame and renaming variables that don't have missing values
+new_data <- data.frame(Stratum = data$VESTR,
+                       PSU = data$ENCPSU,
+                       Segment = data$ENCSEG,
+                       Household = data$ENCCASE,
+                       Weights = data$ANALWT,
+                       PostFac = data$POSTFAC,
+                       Region = factor(data$REGION, levels = 1:4, labels = c("Northeast", "North Central", "South", "West")),
+                       Division = factor(data$DIVISION, levels = 1:9, labels = c("New England", "Middle Atlantic", "East North Central", "West North Central", "South Atlantic", "East South Central", "West South Central", "Mountain", "Pacific")),
+                       Age = data$IRAGE,
+                       Sex = factor(data$IRSEX, levels = 1:2, labels = c("Male", "Female")),
+                       Race = factor(data$IRRACE, levels = 1:4, labels = c("AI/AN", "Asian/PI", "Black", "White")),
+                       Hispanic = factor(data$IRHOIND, levels = 1:2, labels = c("Hispanic", "Not Hispanic")),
+                       Education = data$IREDUC,
+                       WorkStatus = factor(data$IRWORKST, levels = 1:11, labels = c("Full-Time", "Part-Time", "Away from work", "Unemployed looking for work", "Unemployed not looking for work", "Full-Time Homemaker Only", "In School Only", "Retired", "Disabled, not able to work", "Other, in labor force", "Other, not in labor force")),
+                       Insurance = c(1, 0)[data$IRINSUR],
+                       FamilyIncome = factor(data$IRINC47, levels = c(1:13, 99), labels = c("No personal earnings", "< $5000", "$5000 to $6999", "$7000 to $8999", "$9000 to $11999", "$12000 to $14999", "$15000 to $19999", "$20000 to $24999", "$25000 to $29999", "$30000 to $39999", "$40000 to $49999", "$50000 to $74999", "> $75000", "Legitimate Skip")),
+                       HighBP = factor(data$HIGHBP, levels = c(1:2, 96:98), labels = c("Yes", "No", "Multiple Responses", "Refused", "Blank")),
+                       Asthma = factor(data$ASTHMA, levels = c(1:2, 92, 94, 98), labels = c("Yes", "No", "Illegible", "Don't Know", "Blank")),
+                       Psych = factor(data$TRPSYCH, levels = c(1:2, 92, 94, 98), labels = c("Yes", "No", "Illegible", "Don't Know", "Blank")),
+                       Heart = factor(data$HEART, levels = c(1:2, 94:96, 98), labels = c("Yes", "No", "Don't Know", "Bad Data", "Multiple Responses", "Blank")),
+                       CigTry = data$CIGTRY,
+                       CigAge = data$CIGAGE,
+                       CigYears = data$CIGYRS,
+                       AlcTry = data$ALCTRY,
+                       AlcAge = data$ALCAGE,
+                       Xanax = data$XANAX,
+                       Ritalin = data$RITALIN,
+                       Morphine = data$MORPHINE,
+                       MJAge = data$MJAGE,
+                       CocAge = data$COCAGE,
+                       LSD = data$LSD,
+                       Ecstasy = data$ECSTASY,
+                       HeroinAge = data$HERAGE
+                       )
+```
+
+# Defining Transformation Functions for Data
+
+#### Needed for this data set, since most values are encoded
+
+```{r}
+# Grouping Nonreponse and special variables
+age_transformer <- function(x) {
+  for (i in 1:length(x)) {
+    if (x[i] %in% c(185, 192, 194:198)) {
+      x[i] = NA
+    }
+    else if (x[i] %in% c(181, 191, 193, 199)) {
+      x[i] = 100
+    }
+  }
+  return(x)
+}
+
+# Transforming Drug Variables
+drug_transform <- function(x) {
+  for (i in 1:length(x)) {
+    if (x[i] %in% c(2, 81, 91)) {
+      x[i] = 0
+    }
+    else if (x[i] %in% c(94, 98)) {
+      x[i] = NA
+    }
+  }
+  return(x)
+}
+
+# Creating Ranged Variables
+age_create <- function(x) {
+  for (i in 1:length(x)) {
+    if (x[i] < 18) {
+      x[i] = 1
+    }
+    else if (x[i] < 30) {
+      x[i] = 2
+    }
+    else if (x[i] < 40) {
+      x[i] = 3
+    }
+    else if (x[i] < 50) {
+      x[i] = 4
+    }
+    else if (x[i] < 60) {
+      x[i] = 5
+    }
+    else if (x[i] < 70) {
+      x[i] = 6
+    }
+    else {
+      x[i] = 7
+    }
+  }
+  x = factor(x, levels = 1:7, labels = c("< 18", "19 to 29", "30 to 39", "40 to 49", "50 to 59", "60 to 69", ">= 70"))
+  return(x)
+}
+
+# Adding Hispanic to Race
+race <- function(x, y) {
+  x = as.character(x)
+  for (i in 1:length(x)) {
+    if (y[i] == "Hispanic") {
+      x[i] = "Hispanic"
+    }
+  }
+  return(x)
+}
+
+# Grouping by education
+group_education <- function(x){
+  for(i in 1:length(x)){
+    if(x[i] < 6){
+      x[i] = 1
+    }
+    else if(x[i] < 9){
+      x[i] = 2
+      }
+    else if(x[i] < 12){
+     x[i]  = 3
+    } 
+    else if(x[i] == 12){
+      x[i] = 4
+    }
+    else if(x[i] < 16){
+      x[i] = 5
+    }
+    else if(x[i] == 16){
+      x[i] = 6
+    }
+    else if(x[i] > 16){
+      x[i] = 7
+    }
+  }
+  x <- factor(x, levels = 1:7, labels = c("Some Elementary", "Some Middle", "Some High School", "High School", "Some College", "Bachelors", "Some Graduate"))
+  return(x)
+}
+```
+
+
+```{r}
+# Converting to Binary Response
+new_data$HighBP <- c(1, 0, NA, NA, NA)[new_data$HighBP]
+new_data$Asthma <- c(1, 0, NA, NA, NA)[new_data$Asthma]
+new_data$Psych <- c(1, 0, NA, NA, NA)[new_data$Psych]
+new_data$Heart <- c(1, 0, NA, NA, NA)[new_data$Heart]
+
+# Transforming Drugs
+new_data$CigTry <- age_transformer(new_data$CigTry)
+new_data$CigAge <- age_transformer(new_data$CigAge)
+new_data$CigYears <- age_transformer(new_data$CigYears)
+new_data$AlcTry <- age_transformer(new_data$AlcTry)
+new_data$AlcAge <- age_transformer(new_data$AlcAge)
+new_data$Xanax <- drug_transform(new_data$Xanax)
+new_data$Ritalin <- drug_transform(new_data$Ritalin)
+new_data$Morphine <- drug_transform(new_data$Morphine)
+new_data$MJAge <- age_transformer(new_data$MJAge)
+new_data$CocAge <- age_transformer(new_data$CocAge)
+new_data$LSD <- drug_transform(new_data$LSD)
+new_data$Ecstasy <- drug_transform(new_data$Ecstasy)
+new_data$HeroinAge <- age_transformer(new_data$HeroinAge)
+
+# Creating New Columns
+new_data$AgeRange <- age_create(new_data$Age)
+new_data$Race <- race(new_data$Race, new_data$Hispanic)
+new_data$Race <- as.factor(new_data$Race)
+new_data$EduLevel <- group_education(new_data$Education)
+```
+
+# Imputing Values
+
+```{r}
+# Hot-Deck Imputation
+set.seed(251)
+
+imputed_data <- hotdeck(new_data, variable = colnames(new_data)[17:33], ord_var = c("Region", "AgeRange", "Sex", "Race", "EduLevel", "WorkStatus", "Insurance", "FamilyIncome"))
+```
+
+# Recoding "Never Used" values to NAs
+
+```{r}
+recode100 <- function(x) {
+  for (i in 1:length(x)) {
+    if (x[i] == 100) {
+      x[i] <- NA
+    }
+  }
+  return(x)
+}
+
+imputed_data$CigTry <- recode100(imputed_data$CigTry)
+imputed_data$CigAge <- recode100(imputed_data$CigAge)
+imputed_data$CigYears <- recode100(imputed_data$CigYears)
+imputed_data$AlcTry <- recode100(imputed_data$AlcTry)
+imputed_data$AlcAge <- recode100(imputed_data$AlcAge)
+imputed_data$MJAge <- recode100(imputed_data$MJAge)
+imputed_data$CocAge <- recode100(imputed_data$CocAge)
+imputed_data$HeroinAge <- recode100(imputed_data$HeroinAge)
+```
+
+```{r}
+# Creating a Hard Drug and an Opioid Column
+Hard <- imputed_data$Morphine + as.numeric(!is.na(imputed_data$CocAge)) + as.numeric(!is.na(imputed_data$HeroinAge)) + imputed_data$LSD + imputed_data$Ecstasy
+imputed_data$HardDrugs <- Hard
+
+Opioid <- imputed_data$Morphine + as.numeric(!is.na(imputed_data$HeroinAge))
+Opioid <- Opioid > 0
+imputed_data$Opioid <- as.numeric(Opioid)
+```
+
+# Plots
+
+```{r}
+# Figure 1
+with(imputed_data, boxplot(Weights*PostFac ~ Race, main = "Figure 1: Weights by Subject Race", col = c("light yellow", "light blue", "orange", "pink", "light green")))
+```
+
+```{r}
+# Figure 2
+with(imputed_data, boxplot(Weights*PostFac ~ Region, main = "Figure 2: Weights by Region", col = colors()[seq(50, 200, 50)]))
+```
+
+
+
+# Creating Survey Design Object
+
+```{r}
+# Adjusting PSU Options
+options(survey.lonely.psu="adjust")
+```
+
+```{r}
+design <- svydesign(ids = ~ PSU + Household, strata = ~ Division + Stratum + Segment, weights = ~ Weights*PostFac, data = imputed_data, nest = T)
+```
+
+
+# Analysis
+
+#### Ritalin Usage
+```{r}
+ritalin_obj <- svyby(~Ritalin, design = design, FUN = svymean, by = ~AgeRange)
+ritalin_obj$Ritalin <- ritalin_obj$Ritalin * 100
+ritalin_obj$se <- ritalin_obj$se * 100
+ritalin_obj
+```
+
+```{r}
+# Figure 3.
+barplot(ritalin_obj, xlab = "Age Range", ylab = "Percentage of Individuals Who Have Used Ritalin", main = "Figure 3: Barplot of Ritalin Use Between Age Groups", col = "#003262")
+```
+
+```{r}
+confint(ritalin_obj)
+```
+
+#### Opioid Use
+```{r}
+opioid_obj <- svyby(~Opioid, design = design, FUN = svymean, by = ~Division)
+opioid_obj$Opioid <- opioid_obj$Opioid * 100
+opioid_obj$se <- opioid_obj$se * 100
+opioid_obj
+```
+
+```{r}
+# Figure 4.
+par(mar = c(9, 6, 5, 4))
+barplot(opioid_obj, las = 2, ylab = "Percentage of Individuals \n Who Have Used Opiates", main = "Figure 4: Barplot of Opiate Usage Between Geographic Region", col = "#FDB515")
+```
+
+```{r}
+confint(opioid_obj)
+```
+
+
+#### Hard Drug Usage
+```{r}
+hard_marijuana_obj <- svyby(~HardDrugs, design = design, FUN = svymean, by = ~as.factor(as.numeric(!is.na(imputed_data$MJAge))))
+names(hard_marijuana_obj) <- c("Marijuana", "HardDrugs", "se")
+hard_marijuana_obj$HardDrugs <- hard_marijuana_obj$HardDrugs * 100
+hard_marijuana_obj$se <- hard_marijuana_obj$se * 100
+hard_marijuana_obj
+```
+
+```{r}
+# Figure 5.
+par(mar = c(6, 6, 4, 3))
+barplot(hard_marijuana_obj, ylim = c(0, 100), xlab = "Marijuana Use (0 No, 1 Yes)", ylab = "Percentage of Individuals \n Who Have Used Hard Drugs", main = "Figure 5: Barplot of Hard Drug Use Between Marijuana Users", col = "#003262")
+```
+
+```{r}
+confint(hard_marijuana_obj)
+```
+
+```{r}
+hard_cig_obj <- svyby(~HardDrugs, design = design, FUN = svymean, by = ~as.factor(as.numeric(!is.na(imputed_data$CigAge))))
+names(hard_cig_obj) <- c("Cigarettes", "HardDrugs", "se")
+hard_cig_obj$HardDrugs <- hard_cig_obj$HardDrugs * 100
+hard_cig_obj$se <- hard_cig_obj$se * 100
+hard_cig_obj
+```
+
+```{r}
+# Figure 6.
+par(mar = c(6, 6, 4, 3))
+barplot(hard_cig_obj, ylim = c(0, 30), xlab = "Cigarette Use (0 No, 1 Yes)", ylab = "Percentage of Individuals \n Who Have Used Hard Drugs", main = "Figure 6: Barplot of Hard Drug Use Between Cigarette Users", col = "#FDB515")
+```
+
+```{r}
+confint(hard_cig_obj)
+```
+
+#### Health Issues
+```{r}
+bp_obj <- svyby(~HighBP, FUN = svymean, design = design, by = ~as.factor(as.numeric(!is.na(imputed_data$CigAge))))
+names(bp_obj) <- c("Cigarettes", "HighBP", "se")
+bp_obj$HighBP <- bp_obj$HighBP * 100
+bp_obj$se <- bp_obj$se * 100
+bp_obj
+```
+
+```{r}
+# Figure 7.
+par(mar = c(6, 6, 4, 3))
+barplot(bp_obj, ylim = c(0, 30), xlab = "Cigarette Use (0 No, 1 Yes)", ylab = "Percentage of Individuals \n Who Have High Blood Pressure", main = "Figure 7: Barplot of High Blood Pressure Prevalence \n Between Cigarette Users", col = "#003262")
+```
+
+```{r}
+confint(bp_obj)
+```
+
+```{r}
+asthma_obj <- svyby(~Asthma, FUN = svymean, design = design, by = ~as.factor(as.numeric(!is.na(imputed_data$CigAge))))
+names(asthma_obj) <- c("Cigarettes", "Asthma", "se")
+asthma_obj$Asthma <- asthma_obj$Asthma * 100
+asthma_obj$se <- asthma_obj$se * 100
+asthma_obj
+```
+
+```{r}
+# Figure 8.
+par(mar = c(6, 6, 4, 3))
+barplot(asthma_obj, ylim = c(0, 30), xlab = "Cigarette Use (0 No, 1 Yes)", ylab = "Percentage of Individuals \n Who Have Asthma", main = "Figure 8: Barplot of Asthma Prevalence Between Cigarette Users", col = "#FDB515")
+```
+
+```{r}
+confint(asthma_obj)
+```
+
+```{r}
+psych_obj <- svyby(~Psych, FUN = svymean, design = design, by = ~as.factor(as.numeric(!is.na(imputed_data$CigAge))))
+names(psych_obj) <- c("Cigarettes", "Psych", "se")
+psych_obj$Psych <- psych_obj$Psych * 100
+psych_obj$se <- psych_obj$se * 100
+psych_obj
+```
+
+```{r}
+# Figure 9.
+par(mar = c(6, 6, 4, 3))
+barplot(psych_obj, ylim = c(0, 10), xlab = "Cigarette Use (0 No, 1 Yes)", ylab = "Percentage of Individuals \n Who Have A Psychological Disorder", main = "Figure 9: Barplot of Psychological Disorder \n Prevalence Between Cigarette Users", col = "#003262")
+```
+
+```{r}
+confint(psych_obj)
+```
+
+```{r}
+heart_obj <- svyby(~Heart, FUN = svymean, design = design, by = ~as.factor(as.numeric(!is.na(imputed_data$CigAge))))
+names(heart_obj) <- c("Cigarettes", "Heart", "se")
+heart_obj$Heart <- heart_obj$Heart * 100
+heart_obj$se <- heart_obj$se * 100
+heart_obj
+```
+
+```{r}
+# Figure 10.
+par(mar = c(6, 6, 4, 3))
+barplot(heart_obj, ylim = c(0, 25), xlab = "Cigarette Use (0 No, 1 Yes)", ylab = "Percentage of Individuals \n Who Have Heart Disease", main = "Figure 10: Barplot of Heart Disease Prevalence \n Between Cigarette Users", col = "#FDB515")
+```
+
+```{r}
+confint(heart_obj)
+```
