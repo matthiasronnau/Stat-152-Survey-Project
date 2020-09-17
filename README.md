@@ -6,4 +6,4 @@ The data for this project was acquired from the [ICSPR website](https://www.icps
 
 ___
 ### Required Packages
-The packages readr, survey, and VIM were all used for our analysis.
+The packages readr, survey, and VIM were all used for our analysis. The package readr was used for loading the data, the survey package was used for constructing our estimates and making our visualizations, and VIM was used for hot deck imputation of missing values.
